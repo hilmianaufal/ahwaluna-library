@@ -22,6 +22,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'role',
     ];
 
     /**
@@ -66,4 +67,14 @@ class User extends Authenticatable
     {
         return $this->role === 'kepala';
     }
+
+    public function member()
+    {
+        return $this->hasOne(\App\Models\Member::class);
+    }
+
+    public function isMahasantri()
+    {
+        return $this->role === 'mahasantri';
+}
 }

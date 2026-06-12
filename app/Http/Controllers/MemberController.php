@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Member;
+use App\Models\User;
 use Illuminate\Http\Request;
 
 class MemberController extends Controller
@@ -16,7 +17,11 @@ class MemberController extends Controller
 
     public function create()
     {
-        return view('members.create');
+        $users = User::where('role', 'mahasantri')
+            ->orderBy('name')
+            ->get();
+
+        return view('members.create', compact('users'));
     }
 
     public function store(Request $request)
@@ -29,6 +34,7 @@ class MemberController extends Controller
             'phone' => ['nullable', 'max:30'],
             'status' => ['required', 'in:active,inactive'],
             'photo' => ['nullable','image','mimes:jpg,jpeg,png,webp','max:2048'],
+            'user_id' => ['nullable', 'exists:users,id'],
         ]);
 
         $lastId = Member::max('id') + 1;
@@ -69,7 +75,11 @@ class MemberController extends Controller
 
     public function edit(Member $member)
     {
-        return view('members.edit', compact('member'));
+        $users = User::where('role', 'mahasantri')
+            ->orderBy('name')
+            ->get();
+
+        return view('members.edit', compact('member', 'users'));
     }
 
     public function update(Request $request, Member $member)
@@ -82,6 +92,7 @@ class MemberController extends Controller
             'phone' => ['nullable', 'max:30'],
             'photo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
             'status' => ['required', 'in:active,inactive'],
+            'user_id' => ['nullable', 'exists:users,id'],
         ]);
 
             if ($request->hasFile('photo')) {

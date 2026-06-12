@@ -82,14 +82,8 @@
                         Admin
                     </option>
 
-                    <option value="petugas"
-                        @selected(old('role', $user->role) == 'petugas')>
-                        Petugas Perpustakaan
-                    </option>
-
-                    <option value="kepala"
-                        @selected(old('role', $user->role) == 'kepala')>
-                        Kepala Perpustakaan
+                    <option value="mahasantri" @selected(old('role', $user->role ?? '') == 'mahasantri')>
+                        Mahasantri
                     </option>
 
                 </select>

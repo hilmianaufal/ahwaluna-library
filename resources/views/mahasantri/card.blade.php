@@ -1,9 +1,9 @@
-<x-app-layout>
+<x-mahasantri-layout>
 
     <section class="card-wrap space-y-5">
 
         <div class="flex items-center justify-between">
-            <a href="{{ route('members.show', $member) }}"
+            <a href="{{ route('mahasantri.dashboard') }}"
                class="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-emerald-700 shadow-lg">
                 <i data-lucide="arrow-left"></i>
             </a>
@@ -18,4 +18,4 @@
 
     </section>
 
-</x-app-layout>
+</x-mahasantri-layout>

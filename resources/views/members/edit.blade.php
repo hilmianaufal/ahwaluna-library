@@ -69,6 +69,24 @@
                 <input type="file" name="photo" accept="image/*"
                     class="w-full rounded-2xl border-0 bg-lime-50 px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-emerald-400">
             </div>
+
+            <div>
+        <label class="mb-2 block text-sm font-black text-slate-700">Akun Login Mahasantri</label>
+
+        <select name="user_id"
+                class="w-full rounded-2xl border-0 bg-lime-50 px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-emerald-400">
+            <option value="">Belum dihubungkan</option>
+            @foreach ($users as $user)
+                <option value="{{ $user->id }}" @selected(old('user_id', $member->user_id) == $user->id)>
+                    {{ $user->name }} - {{ $user->email }}
+                </option>
+            @endforeach
+        </select>
+
+        <p class="mt-1 text-xs font-bold text-slate-400">
+            Pilih akun user dengan role Mahasantri.
+        </p>
+    </div>
             <button type="submit"
                     class="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-lime-400 px-5 py-4 text-sm font-black text-white shadow-lg shadow-emerald-500/25">
                 <i data-lucide="save" class="h-5 w-5"></i>
