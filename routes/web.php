@@ -17,8 +17,15 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return view('auth.login');
-});
+    return view('welcome', [
+        'totalBooks' => Book::count(),
+        'totalMembers' => Member::count(),
+        'totalRepositories' => Repository::count(),
+        'totalLoans' => Loan::count(),
+        'latestBooks' => Book::with(['category', 'shelf'])->latest()->take(6)->get(),
+        'latestRepositories' => Repository::latest()->take(3)->get(),
+    ]);
+})->name('home');
 
 
 Route::middleware(['auth', 'verified'])->group(function () {
