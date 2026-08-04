@@ -1,0 +1,1739 @@
+]633;E;{     find app/Exports app/Http/Controllers app/Models         -type f -name "*.php" | sort |     while IFS= read -r file\x3b do         echo ""\x3b         echo "============================================================"\x3b         echo "FILE: $file"\x3b         echo "============================================================"\x3b         cat "$file"\x3b         echo ""\x3b     done\x3b } > semua-file-aplikasi.txt;caa127f1-6485-46a4-8b0d-cf583a46e533]633;C
+============================================================
+FILE: app/Exports/LoansExport.php
+============================================================
+<?php
+
+namespace App\Exports;
+
+use App\Models\Loan;
+use Illuminate\Http\Request;
+use Maatwebsite\Excel\Concerns\FromCollection;
+use Maatwebsite\Excel\Concerns\WithHeadings;
+
+class LoansExport implements FromCollection, WithHeadings
+{
+    protected $request;
+
+    public function __construct(Request $request)
+    {
+        $this->request = $request;
+    }
+
+    public function collection()
+    {
+        $query = Loan::with(['book', 'member', 'user'])->latest();
+
+        if ($this->request->filled('start_date')) {
+            $query->whereDate('borrowed_at', '>=', $this->request->start_date);
+        }
+
+        if ($this->request->filled('end_date')) {
+            $query->whereDate('borrowed_at', '<=', $this->request->end_date);
+        }
+
+        if ($this->request->filled('status')) {
+            $query->where('status', $this->request->status);
+        }
+
+        return $query->get()->map(function ($loan) {
+            return [
+                'Kode' => $loan->loan_code,
+                'Anggota' => $loan->member->name ?? '-',
+                'Kode Anggota' => $loan->member->member_code ?? '-',
+                'Buku' => $loan->book->title ?? '-',
+                'Kode Buku' => $loan->book->code ?? '-',
+                'Tanggal Pinjam' => $loan->borrowed_at?->format('d/m/Y'),
+                'Jatuh Tempo' => $loan->due_at?->format('d/m/Y'),
+                'Tanggal Kembali' => $loan->returned_at?->format('d/m/Y') ?? '-',
+                'Status' => strtoupper($loan->status),
+                'Denda' => $loan->fine_amount,
+                'Petugas' => $loan->user->name ?? '-',
+            ];
+        });
+    }
+
+    public function headings(): array
+    {
+        return [
+            'Kode',
+            'Anggota',
+            'Kode Anggota',
+            'Buku',
+            'Kode Buku',
+            'Tanggal Pinjam',
+            'Jatuh Tempo',
+            'Tanggal Kembali',
+            'Status',
+            'Denda',
+            'Petugas',
+        ];
+    }
+}
+
+============================================================
+FILE: app/Http/Controllers/Auth/AuthenticatedSessionController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\LoginRequest;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\View\View;
+
+class AuthenticatedSessionController extends Controller
+{
+    public function create(): View
+    {
+        return view('auth.login');
+    }
+
+    public function store(LoginRequest $request): RedirectResponse
+    {
+        $request->authenticate();
+
+        $request->session()->regenerate();
+
+        $user = $request->user();
+
+        if ($user->role === 'mahasantri') {
+            return redirect()->intended(route('mahasantri.dashboard'));
+        }
+
+        return redirect()->intended(route('dashboard'));
+    }
+
+    public function destroy(Request $request): RedirectResponse
+    {
+        Auth::guard('web')->logout();
+
+        $request->session()->invalidate();
+
+        $request->session()->regenerateToken();
+
+        return redirect('/');
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/Auth/ConfirmablePasswordController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
+
+class ConfirmablePasswordController extends Controller
+{
+    /**
+     * Show the confirm password view.
+     */
+    public function show(): View
+    {
+        return view('auth.confirm-password');
+    }
+
+    /**
+     * Confirm the user's password.
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        if (! Auth::guard('web')->validate([
+            'email' => $request->user()->email,
+            'password' => $request->password,
+        ])) {
+            throw ValidationException::withMessages([
+                'password' => __('auth.password'),
+            ]);
+        }
+
+        $request->session()->put('auth.password_confirmed_at', time());
+
+        return redirect()->intended(route('dashboard', absolute: false));
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/Auth/EmailVerificationNotificationController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+
+class EmailVerificationNotificationController extends Controller
+{
+    /**
+     * Send a new email verification notification.
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        if ($request->user()->hasVerifiedEmail()) {
+            return redirect()->intended(route('dashboard', absolute: false));
+        }
+
+        $request->user()->sendEmailVerificationNotification();
+
+        return back()->with('status', 'verification-link-sent');
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/Auth/EmailVerificationPromptController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\View\View;
+
+class EmailVerificationPromptController extends Controller
+{
+    /**
+     * Display the email verification prompt.
+     */
+    public function __invoke(Request $request): RedirectResponse|View
+    {
+        return $request->user()->hasVerifiedEmail()
+                    ? redirect()->intended(route('dashboard', absolute: false))
+                    : view('auth.verify-email');
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/Auth/NewPasswordController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rules;
+use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
+
+class NewPasswordController extends Controller
+{
+    /**
+     * Display the password reset view.
+     */
+    public function create(Request $request): View
+    {
+        return view('auth.reset-password', ['request' => $request]);
+    }
+
+    /**
+     * Handle an incoming new password request.
+     *
+     * @throws ValidationException
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'token' => ['required'],
+            'email' => ['required', 'email'],
+            'password' => ['required', 'confirmed', Rules\Password::defaults()],
+        ]);
+
+        // Here we will attempt to reset the user's password. If it is successful we
+        // will update the password on an actual user model and persist it to the
+        // database. Otherwise we will parse the error and return the response.
+        $status = Password::reset(
+            $request->only('email', 'password', 'password_confirmation', 'token'),
+            function (User $user) use ($request) {
+                $user->forceFill([
+                    'password' => Hash::make($request->password),
+                    'remember_token' => Str::random(60),
+                ])->save();
+
+                event(new PasswordReset($user));
+            }
+        );
+
+        // If the password was successfully reset, we will redirect the user back to
+        // the application's home authenticated view. If there is an error we can
+        // redirect them back to where they came from with their error message.
+        return $status == Password::PASSWORD_RESET
+                    ? redirect()->route('login')->with('status', __($status))
+                    : back()->withInput($request->only('email'))
+                        ->withErrors(['email' => __($status)]);
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/Auth/PasswordController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
+
+class PasswordController extends Controller
+{
+    /**
+     * Update the user's password.
+     */
+    public function update(Request $request): RedirectResponse
+    {
+        $validated = $request->validateWithBag('updatePassword', [
+            'current_password' => ['required', 'current_password'],
+            'password' => ['required', Password::defaults(), 'confirmed'],
+        ]);
+
+        $request->user()->update([
+            'password' => Hash::make($validated['password']),
+        ]);
+
+        return back()->with('status', 'password-updated');
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/Auth/PasswordResetLinkController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
+
+class PasswordResetLinkController extends Controller
+{
+    /**
+     * Display the password reset link request view.
+     */
+    public function create(): View
+    {
+        return view('auth.forgot-password');
+    }
+
+    /**
+     * Handle an incoming password reset link request.
+     *
+     * @throws ValidationException
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'email' => ['required', 'email'],
+        ]);
+
+        // We will send the password reset link to this user. Once we have attempted
+        // to send the link, we will examine the response then see the message we
+        // need to show to the user. Finally, we'll send out a proper response.
+        $status = Password::sendResetLink(
+            $request->only('email')
+        );
+
+        return $status == Password::RESET_LINK_SENT
+                    ? back()->with('status', __($status))
+                    : back()->withInput($request->only('email'))
+                        ->withErrors(['email' => __($status)]);
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/Auth/RegisteredUserController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use Illuminate\Auth\Events\Registered;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules;
+use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
+
+class RegisteredUserController extends Controller
+{
+    /**
+     * Display the registration view.
+     */
+    public function create(): View
+    {
+        return view('auth.register');
+    }
+
+    /**
+     * Handle an incoming registration request.
+     *
+     * @throws ValidationException
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
+            'password' => ['required', 'confirmed', Rules\Password::defaults()],
+        ]);
+
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+        ]);
+
+        event(new Registered($user));
+
+        Auth::login($user);
+
+        return redirect(route('dashboard', absolute: false));
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/Auth/VerifyEmailController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Auth\Events\Verified;
+use Illuminate\Foundation\Auth\EmailVerificationRequest;
+use Illuminate\Http\RedirectResponse;
+
+class VerifyEmailController extends Controller
+{
+    /**
+     * Mark the authenticated user's email address as verified.
+     */
+    public function __invoke(EmailVerificationRequest $request): RedirectResponse
+    {
+        if ($request->user()->hasVerifiedEmail()) {
+            return redirect()->intended(route('dashboard', absolute: false).'?verified=1');
+        }
+
+        if ($request->user()->markEmailAsVerified()) {
+            event(new Verified($request->user()));
+        }
+
+        return redirect()->intended(route('dashboard', absolute: false).'?verified=1');
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/BookController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Book;
+use App\Models\Category;
+use App\Models\Shelf;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+
+class BookController extends Controller
+{
+    public function index()
+    {
+        $books = Book::with(['category', 'shelf'])
+            ->latest()
+            ->paginate(10);
+
+        return view('books.index', compact('books'));
+    }
+
+    public function create()
+    {
+        $categories = Category::orderBy('name')->get();
+        $shelves = Shelf::orderBy('code')->get();
+
+        return view('books.create', compact('categories', 'shelves'));
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'category_id' => ['nullable', 'exists:categories,id'],
+            'shelf_id' => ['nullable', 'exists:shelves,id'],
+            'title' => ['required', 'max:255'],
+            'author' => ['nullable', 'max:255'],
+            'publisher' => ['nullable', 'max:255'],
+            'year' => ['nullable', 'digits:4'],
+            'isbn' => ['nullable', 'max:255'],
+            'stock' => ['required', 'integer', 'min:1'],
+            'cover' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+        ]);
+
+        $data['code'] = 'BK-' . strtoupper(Str::random(6));
+        $data['available_stock'] = $data['stock'];
+        $data['is_digital'] = false;
+        $data['can_borrow'] = true;
+        if ($request->hasFile('cover')) {
+            if (!file_exists(public_path('uploads/books'))) {
+                mkdir(public_path('uploads/books'), 0777, true);
+            }
+
+            $file = $request->file('cover');
+            $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+
+            $file->move(public_path('uploads/books'), $filename);
+
+            $data['cover'] = 'uploads/books/' . $filename;
+        }
+        Book::create($data);
+
+        return redirect()
+            ->route('books.index')
+            ->with('success', 'Buku berhasil ditambahkan.');
+    }
+
+    public function show(Book $book)
+    {
+        $book->load(['category', 'shelf']);
+
+        return view('books.show', compact('book'));
+    }
+
+    public function edit(Book $book)
+    {
+        $categories = Category::orderBy('name')->get();
+        $shelves = Shelf::orderBy('code')->get();
+
+        return view('books.edit', compact('book', 'categories', 'shelves'));
+    }
+
+    public function update(Request $request, Book $book)
+    {
+        $data = $request->validate([
+            'category_id' => ['nullable', 'exists:categories,id'],
+            'shelf_id' => ['nullable', 'exists:shelves,id'],
+            'title' => ['required', 'max:255'],
+            'author' => ['nullable', 'max:255'],
+            'publisher' => ['nullable', 'max:255'],
+            'year' => ['nullable', 'digits:4'],
+            'isbn' => ['nullable', 'max:255'],
+            'stock' => ['required', 'integer', 'min:1'],
+            'cover' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+        ]);
+
+        $difference = $data['stock'] - $book->stock;
+        $data['available_stock'] = max(0, $book->available_stock + $difference);
+
+        if ($request->hasFile('cover')) {
+            if (!file_exists(public_path('uploads/books'))) {
+                mkdir(public_path('uploads/books'), 0777, true);
+            }
+
+            if ($book->cover && file_exists(public_path($book->cover))) {
+                unlink(public_path($book->cover));
+            }
+
+            $file = $request->file('cover');
+            $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+
+            $file->move(public_path('uploads/books'), $filename);
+
+            $data['cover'] = 'uploads/books/' . $filename;
+        }
+
+        $book->update($data);
+
+        return redirect()
+            ->route('books.index')
+            ->with('success', 'Buku berhasil diperbarui.');
+    }
+
+    public function destroy(Book $book)
+    {
+        $book->delete();
+
+        return redirect()
+            ->route('books.index')
+            ->with('success', 'Buku berhasil dihapus.');
+    }
+
+    public function qr(Book $book)
+    {
+        return view('books.qr', compact('book'));
+    }
+}
+
+============================================================
+FILE: app/Http/Controllers/CategoryController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Category;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+
+class CategoryController extends Controller
+{
+    public function index()
+    {
+        $categories = Category::withCount('books')->latest()->paginate(10);
+
+        return view('categories.index', compact('categories'));
+    }
+
+    public function create()
+    {
+        return view('categories.create');
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'max:255', 'unique:categories,name'],
+            'icon' => ['nullable', 'max:100'],
+            'description' => ['nullable'],
+        ]);
+
+        $data['slug'] = Str::slug($data['name']);
+        $data['icon'] = $data['icon'] ?: 'book-open';
+
+        Category::create($data);
+
+        return redirect()->route('categories.index')->with('success', 'Kategori berhasil ditambahkan.');
+    }
+
+    public function edit(Category $category)
+    {
+        return view('categories.edit', compact('category'));
+    }
+
+    public function update(Request $request, Category $category)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'max:255', 'unique:categories,name,' . $category->id],
+            'icon' => ['nullable', 'max:100'],
+            'description' => ['nullable'],
+        ]);
+
+        $data['slug'] = Str::slug($data['name']);
+        $data['icon'] = $data['icon'] ?: 'book-open';
+
+        $category->update($data);
+
+        return redirect()->route('categories.index')->with('success', 'Kategori berhasil diperbarui.');
+    }
+
+    public function destroy(Category $category)
+    {
+        $category->delete();
+
+        return back()->with('success', 'Kategori berhasil dihapus.');
+    }
+}
+
+============================================================
+FILE: app/Http/Controllers/Controller.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+abstract class Controller
+{
+    //
+}
+
+
+============================================================
+FILE: app/Http/Controllers/LoanController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Book;
+use App\Models\Loan;
+use App\Models\Member;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+
+class LoanController extends Controller
+{
+        public function index()
+        {
+            Loan::whereIn('status', ['borrowed', 'late'])
+                ->whereDate('due_at', '<', now()->toDateString())
+                ->update([
+                    'status' => 'late',
+                ]);
+
+            $loans = Loan::with([
+                    'book',
+                    'member',
+                    'user'
+                ])
+                ->latest()
+                ->paginate(10);
+
+            return view('loans.index', compact('loans'));
+        }
+
+    public function create()
+    {
+        $members = Member::where('status', 'active')
+            ->orderBy('name')
+            ->get();
+
+        $books = Book::where('available_stock', '>', 0)
+            ->orderBy('title')
+            ->get();
+
+        return view('loans.create', compact(
+            'members',
+            'books'
+        ));
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'member_id' => 'required|exists:members,id',
+            'book_id' => 'required|exists:books,id',
+            'borrowed_at' => 'required|date',
+            'due_at' => 'required|date',
+        ]);
+
+        $book = Book::findOrFail($request->book_id);
+
+        if ($book->available_stock <= 0) {
+            return back()->with(
+                'error',
+                'Stok buku habis.'
+            );
+        }
+
+        Loan::create([
+            'loan_code' => 'PJM-' . time(),
+            'member_id' => $request->member_id,
+            'book_id' => $request->book_id,
+            'user_id' => Auth::id(),
+            'borrowed_at' => $request->borrowed_at,
+            'due_at' => $request->due_at,
+            'status' => 'borrowed',
+        ]);
+
+        $book->decrement('available_stock');
+
+        return redirect()
+            ->route('loans.index')
+            ->with(
+                'success',
+                'Peminjaman berhasil dibuat.'
+            );
+    }
+
+    public function show(Loan $loan)
+    {
+        $loan->load([
+            'book',
+            'member',
+            'user'
+        ]);
+
+        return view('loans.show', compact('loan'));
+    }
+
+    public function destroy(Loan $loan)
+    {
+        if ($loan->status == 'borrowed') {
+
+            $loan->book->increment(
+                'available_stock'
+            );
+        }
+
+        $loan->delete();
+
+        return back()->with(
+            'success',
+            'Data berhasil dihapus.'
+        );
+    }
+
+    public function returnBook(Loan $loan)
+    {
+        if ($loan->status === 'returned') {
+            return back()->with('error', 'Buku sudah dikembalikan.');
+        }
+
+        $finePerDay = 1000;
+        $today = now()->toDateString();
+
+        $lateDays = 0;
+
+        if ($today > $loan->due_at->toDateString()) {
+            $lateDays = $loan->due_at->diffInDays(now());
+        }
+
+        $loan->update([
+            'returned_at' => now()->toDateString(),
+            'status' => 'returned',
+            'fine_amount' => $lateDays * $finePerDay,
+        ]);
+
+        $loan->book->increment('available_stock');
+
+        return redirect()
+            ->route('loans.index')
+            ->with('success', 'Buku berhasil dikembalikan.');
+    }
+
+
+    public function scanMember($code)
+    {
+        $member = Member::where('member_code', $code)
+            ->where('status', 'active')
+            ->first();
+
+        if (! $member) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anggota tidak ditemukan atau tidak aktif.',
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'member' => [
+                'id' => $member->id,
+                'name' => $member->name,
+                'member_code' => $member->member_code,
+                'nim' => $member->nim,
+                'program_study' => $member->program_study,
+                'class_year' => $member->class_year,
+                'photo' => $member->photo ? asset($member->photo) : null,
+            ],
+        ]);
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/MahasantriDashboardController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Book;
+use App\Models\Repository;
+use Illuminate\Support\Facades\Auth;
+
+class MahasantriDashboardController extends Controller
+{
+    public function index()
+    {
+        $member = Auth::user()->member;
+
+        return view('mahasantri.dashboard', [
+            'member' => $member,
+            'activeLoans' => $member?->loans()
+                ->with('book')
+                ->whereIn('status', ['borrowed', 'late'])
+                ->latest()
+                ->get() ?? collect(),
+
+            'latestBooks' => Book::with(['category', 'shelf'])
+                ->latest()
+                ->take(5)
+                ->get(),
+
+            'latestRepositories' => Repository::latest()
+                ->take(5)
+                ->get(),
+        ]);
+    }
+    public function catalog()
+    {
+        $books = \App\Models\Book::with(['category', 'shelf'])
+            ->latest()
+            ->paginate(12);
+
+        return view('mahasantri.catalog', compact('books'));
+    }
+
+    public function card()
+{
+    $member = auth()->user()->member;
+
+    if (! $member) {
+        return redirect()
+            ->route('mahasantri.dashboard')
+            ->with('error', 'Akun belum terhubung dengan anggota.');
+    }
+
+    return view('mahasantri.card', compact('member'));
+}
+
+    public function bookDetail(\App\Models\Book $book)
+    {
+        $book->load(['category', 'shelf']);
+
+        return view('mahasantri.book-detail', compact('book'));
+    }
+
+    public function repositories()
+    {
+        $repositories = \App\Models\Repository::latest()
+            ->paginate(10);
+
+        return view('mahasantri.repositories', compact('repositories'));
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/MemberController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Member;
+use App\Models\User;
+use Illuminate\Http\Request;
+
+class MemberController extends Controller
+{
+    public function index()
+    {
+        $members = Member::latest()->paginate(10);
+
+        return view('members.index', compact('members'));
+    }
+
+    public function create()
+    {
+        $users = User::where('role', 'mahasantri')
+            ->orderBy('name')
+            ->get();
+
+        return view('members.create', compact('users'));
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'max:255'],
+            'nim' => ['nullable', 'max:100'],
+            'program_study' => ['nullable', 'max:255'],
+            'class_year' => ['nullable', 'max:20'],
+            'phone' => ['nullable', 'max:30'],
+            'status' => ['required', 'in:active,inactive'],
+            'photo' => ['nullable','image','mimes:jpg,jpeg,png,webp','max:2048'],
+            'user_id' => ['nullable', 'exists:users,id'],
+        ]);
+
+        $lastId = Member::max('id') + 1;
+
+        $data['member_code'] = 'AGT-' . str_pad($lastId, 4, '0', STR_PAD_LEFT);
+
+        if ($request->hasFile('photo')) {
+
+            if (! file_exists(public_path('uploads/members'))) {
+                mkdir(public_path('uploads/members'), 0777, true);
+            }
+
+            $file = $request->file('photo');
+
+            $filename = time().'_'.uniqid().'.'.$file->getClientOriginalExtension();
+
+            $file->move(
+                public_path('uploads/members'),
+                $filename
+            );
+
+            $data['photo'] = 'uploads/members/'.$filename;
+        }
+
+        Member::create($data);
+
+        return redirect()
+            ->route('members.index')
+            ->with('success', 'Anggota berhasil ditambahkan.');
+    }
+
+    public function show(Member $member)
+    {
+        $member->load('loans.book');
+
+        return view('members.show', compact('member'));
+    }
+
+    public function edit(Member $member)
+    {
+        $users = User::where('role', 'mahasantri')
+            ->orderBy('name')
+            ->get();
+
+        return view('members.edit', compact('member', 'users'));
+    }
+
+    public function update(Request $request, Member $member)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'max:255'],
+            'nim' => ['nullable', 'max:100'],
+            'program_study' => ['nullable', 'max:255'],
+            'class_year' => ['nullable', 'max:20'],
+            'phone' => ['nullable', 'max:30'],
+            'photo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'status' => ['required', 'in:active,inactive'],
+            'user_id' => ['nullable', 'exists:users,id'],
+        ]);
+
+            if ($request->hasFile('photo')) {
+                if (!file_exists(public_path('uploads/members'))) {
+                    mkdir(public_path('uploads/members'), 0777, true);
+                }
+
+                if ($member->photo && file_exists(public_path($member->photo))) {
+                    unlink(public_path($member->photo));
+                }
+
+                $file = $request->file('photo');
+                $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+
+                $file->move(public_path('uploads/members'), $filename);
+
+                $data['photo'] = 'uploads/members/' . $filename;
+            }
+        $member->update($data);
+
+        return redirect()
+            ->route('members.index')
+            ->with('success', 'Anggota berhasil diperbarui.');
+    }
+
+
+    public function card(Member $member)
+    {
+        return view(
+            'members.card',
+            compact('member')
+        );
+    }
+
+    public function destroy(Member $member)
+    {
+        $member->delete();
+
+        return redirect()
+            ->route('members.index')
+            ->with('success', 'Anggota berhasil dihapus.');
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/ProfileController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Requests\ProfileUpdateRequest;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Redirect;
+use Illuminate\View\View;
+
+class ProfileController extends Controller
+{
+    /**
+     * Display the user's profile form.
+     */
+    public function edit(Request $request): View
+    {
+        return view('profile.edit', [
+            'user' => $request->user(),
+        ]);
+    }
+
+    /**
+     * Update the user's profile information.
+     */
+    public function update(ProfileUpdateRequest $request): RedirectResponse
+    {
+        $request->user()->fill($request->validated());
+
+        if ($request->user()->isDirty('email')) {
+            $request->user()->email_verified_at = null;
+        }
+
+        $request->user()->save();
+
+        return Redirect::route('profile.edit')->with('status', 'profile-updated');
+    }
+
+    /**
+     * Delete the user's account.
+     */
+    public function destroy(Request $request): RedirectResponse
+    {
+        $request->validateWithBag('userDeletion', [
+            'password' => ['required', 'current_password'],
+        ]);
+
+        $user = $request->user();
+
+        Auth::logout();
+
+        $user->delete();
+
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return Redirect::to('/');
+    }
+}
+
+
+============================================================
+FILE: app/Http/Controllers/ReportController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Exports\LoansExport;
+use App\Models\Loan;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\Request;
+use Maatwebsite\Excel\Facades\Excel;
+
+class ReportController extends Controller
+{
+    public function loans(Request $request)
+    {
+        $query = Loan::with(['book', 'member', 'user'])->latest();
+
+        if ($request->filled('start_date')) {
+            $query->whereDate('borrowed_at', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('borrowed_at', '<=', $request->end_date);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        $loans = $query->paginate(15)->withQueryString();
+
+        $totalLoans = (clone $query)->count();
+        $totalFine = (clone $query)->sum('fine_amount');
+
+        return view('reports.loans', compact('loans', 'totalLoans', 'totalFine'));
+    }
+
+
+    public function loansPdf(Request $request)
+    {
+        $query = Loan::with(['book', 'member', 'user'])->latest();
+
+        if ($request->filled('start_date')) {
+            $query->whereDate('borrowed_at', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('borrowed_at', '<=', $request->end_date);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        $loans = $query->get();
+        $totalLoans = $loans->count();
+        $totalFine = $loans->sum('fine_amount');
+
+        $pdf = Pdf::loadView('reports.loans-pdf', compact(
+            'loans',
+            'totalLoans',
+            'totalFine'
+        ))->setPaper('a4', 'portrait');
+
+        return $pdf->download('laporan-peminjaman-ahwaluna.pdf');
+    }
+
+    public function loansExcel(Request $request)
+    {
+        return Excel::download(
+            new LoansExport($request),
+            'laporan-peminjaman-ahwaluna.xlsx'
+        );
+    }
+}
+
+============================================================
+FILE: app/Http/Controllers/RepositoryController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Repository;
+use Illuminate\Http\Request;
+
+class RepositoryController extends Controller
+{
+    public function index()
+    {
+        $repositories = Repository::latest()->paginate(10);
+
+        return view('repositories.index', compact('repositories'));
+    }
+
+    public function create()
+    {
+        return view('repositories.create');
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'title' => ['required', 'max:255'],
+            'author' => ['required', 'max:255'],
+            'nim' => ['nullable', 'max:100'],
+            'supervisor' => ['nullable', 'max:255'],
+            'year' => ['nullable', 'digits:4'],
+            'type' => ['required', 'max:100'],
+            'abstract' => ['nullable'],
+            'pdf_file' => ['nullable', 'mimes:pdf', 'max:10240'],
+        ]);
+
+        if ($request->hasFile('pdf_file')) {
+            if (!file_exists(public_path('uploads/repositories'))) {
+                mkdir(public_path('uploads/repositories'), 0777, true);
+            }
+
+            $file = $request->file('pdf_file');
+            $filename = time() . '_' . uniqid() . '.pdf';
+
+            $file->move(public_path('uploads/repositories'), $filename);
+
+            $data['pdf_file'] = 'uploads/repositories/' . $filename;
+        }
+
+        Repository::create($data);
+
+        return redirect()
+            ->route('repositories.index')
+            ->with('success', 'Repository berhasil ditambahkan.');
+    }
+
+    public function show(Repository $repository)
+    {
+        $repository->increment('view_count');
+
+        return view('repositories.show', compact('repository'));
+    }
+
+    public function edit(Repository $repository)
+    {
+        return view('repositories.edit', compact('repository'));
+    }
+
+    public function update(Request $request, Repository $repository)
+    {
+        $data = $request->validate([
+            'title' => ['required', 'max:255'],
+            'author' => ['required', 'max:255'],
+            'nim' => ['nullable', 'max:100'],
+            'supervisor' => ['nullable', 'max:255'],
+            'year' => ['nullable', 'digits:4'],
+            'type' => ['required', 'max:100'],
+            'abstract' => ['nullable'],
+            'pdf_file' => ['nullable', 'mimes:pdf', 'max:10240'],
+        ]);
+
+        if ($request->hasFile('pdf_file')) {
+            if (!file_exists(public_path('uploads/repositories'))) {
+                mkdir(public_path('uploads/repositories'), 0777, true);
+            }
+
+            if ($repository->pdf_file && file_exists(public_path($repository->pdf_file))) {
+                unlink(public_path($repository->pdf_file));
+            }
+
+            $file = $request->file('pdf_file');
+            $filename = time() . '_' . uniqid() . '.pdf';
+
+            $file->move(public_path('uploads/repositories'), $filename);
+
+            $data['pdf_file'] = 'uploads/repositories/' . $filename;
+        }
+
+        $repository->update($data);
+
+        return redirect()
+            ->route('repositories.index')
+            ->with('success', 'Repository berhasil diperbarui.');
+    }
+
+        public function download(Repository $repository)
+        {
+            if (! $repository->pdf_file || ! file_exists(public_path($repository->pdf_file))) {
+                return back()->with('error', 'File PDF tidak ditemukan.');
+            }
+
+            $repository->increment('download_count');
+
+            return response()->download(public_path($repository->pdf_file));
+        }
+
+    public function destroy(Repository $repository)
+    {
+        if ($repository->pdf_file && file_exists(public_path($repository->pdf_file))) {
+            unlink(public_path($repository->pdf_file));
+        }
+
+        $repository->delete();
+
+        return back()->with('success', 'Repository berhasil dihapus.');
+    }
+}
+
+============================================================
+FILE: app/Http/Controllers/ShelfController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Shelf;
+use Illuminate\Http\Request;
+
+class ShelfController extends Controller
+{
+    public function index()
+    {
+        $shelves = Shelf::withCount('books')->latest()->paginate(10);
+
+        return view('shelves.index', compact('shelves'));
+    }
+
+    public function create()
+    {
+        return view('shelves.create');
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'code' => ['required', 'max:50', 'unique:shelves,code'],
+            'name' => ['required', 'max:255'],
+            'location' => ['nullable', 'max:255'],
+        ]);
+
+        Shelf::create($data);
+
+        return redirect()
+            ->route('shelves.index')
+            ->with('success', 'Rak buku berhasil ditambahkan.');
+    }
+
+    public function edit(Shelf $shelf)
+    {
+        return view('shelves.edit', compact('shelf'));
+    }
+
+    public function update(Request $request, Shelf $shelf)
+    {
+        $data = $request->validate([
+            'code' => ['required', 'max:50', 'unique:shelves,code,' . $shelf->id],
+            'name' => ['required', 'max:255'],
+            'location' => ['nullable', 'max:255'],
+        ]);
+
+        $shelf->update($data);
+
+        return redirect()
+            ->route('shelves.index')
+            ->with('success', 'Rak buku berhasil diperbarui.');
+    }
+
+    public function destroy(Shelf $shelf)
+    {
+        $shelf->delete();
+
+        return back()->with('success', 'Rak buku berhasil dihapus.');
+    }
+}
+
+============================================================
+FILE: app/Http/Controllers/UserController.php
+============================================================
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
+
+class UserController extends Controller
+{
+    public function index()
+    {
+        $users = User::latest()->paginate(10);
+
+        return view('users.index', compact('users'));
+    }
+
+    public function create()
+    {
+        return view('users.create');
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required'],
+            'email' => ['required', 'email', 'unique:users,email'],
+            'password' => ['required', 'min:6'],
+            'role' => ['required', Rule::in(['admin', 'petugas', 'kepala', 'mahasantri'])],
+        ]);
+
+        $data['password'] = Hash::make($data['password']);
+
+        User::create($data);
+
+        return redirect()
+            ->route('users.index')
+            ->with('success', 'User berhasil ditambahkan.');
+    }
+
+    public function edit(User $user)
+    {
+        return view('users.edit', compact('user'));
+    }
+
+    public function update(Request $request, User $user)
+    {
+        $data = $request->validate([
+            'name' => ['required'],
+            'email' => ['required', 'email', Rule::unique('users', 'email')->ignore($user->id)],
+            'role' => ['required', Rule::in(['admin', 'petugas', 'kepala', 'mahasantri'])],
+            'password' => ['nullable', 'min:6'],
+        ]);
+
+        if ($request->filled('password')) {
+            $data['password'] = Hash::make($request->password);
+        } else {
+            unset($data['password']);
+        }
+
+        $user->update($data);
+
+        return redirect()
+            ->route('users.index')
+            ->with('success', 'User berhasil diperbarui.');
+    }
+
+    public function destroy(User $user)
+    {
+        $user->delete();
+
+        return back()
+            ->with('success', 'User berhasil dihapus.');
+    }
+}
+
+
+============================================================
+FILE: app/Models/Book.php
+============================================================
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+class Book extends Model
+{
+    use HasFactory;
+
+    protected $guarded = ['id'];
+
+    public function category()
+    {
+        return $this->belongsTo(Category::class);
+    }
+
+    public function shelf()
+    {
+        return $this->belongsTo(Shelf::class);
+    }
+
+    public function loans()
+    {
+        return $this->hasMany(Loan::class);
+    }
+}
+
+============================================================
+FILE: app/Models/Category.php
+============================================================
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+class Category extends Model
+{
+    use HasFactory;
+
+    protected $guarded = ['id'];
+
+    public function books()
+    {
+        return $this->hasMany(Book::class);
+    }
+}
+
+============================================================
+FILE: app/Models/Loan.php
+============================================================
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+class Loan extends Model
+{
+    use HasFactory;
+
+    protected $guarded = ['id'];
+
+    protected $casts = [
+        'borrowed_at' => 'date',
+        'due_at' => 'date',
+        'returned_at' => 'date',
+    ];
+
+    public function book()
+    {
+        return $this->belongsTo(Book::class);
+    }
+
+    public function member()
+    {
+        return $this->belongsTo(Member::class);
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+}
+
+============================================================
+FILE: app/Models/Member.php
+============================================================
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+class Member extends Model
+{
+    use HasFactory;
+
+    protected $guarded = ['id'];
+
+    public function loans()
+    {
+        return $this->hasMany(Loan::class);
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+}
+
+
+============================================================
+FILE: app/Models/Repository.php
+============================================================
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+class Repository extends Model
+{
+    use HasFactory;
+
+    protected $guarded = ['id'];
+}
+
+============================================================
+FILE: app/Models/Shelf.php
+============================================================
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+class Shelf extends Model
+{
+    use HasFactory;
+
+    protected $guarded = ['id'];
+
+    public function books()
+    {
+        return $this->hasMany(Book::class);
+    }
+}
+
+============================================================
+FILE: app/Models/User.php
+============================================================
+<?php
+
+namespace App\Models;
+
+// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+
+class User extends Authenticatable
+{
+    /** @use HasFactory<UserFactory> */
+    use HasFactory, Notifiable;
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var list<string>
+     */
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+        'role',
+    ];
+
+    /**
+     * The attributes that should be hidden for serialization.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'email_verified_at' => 'datetime',
+            'password' => 'hashed',
+        ];
+    }
+
+    public function loans()
+    {
+        return $this->hasMany(Loan::class);
+    }
+
+    public function isAdmin()
+    {
+        return $this->role === 'admin';
+    }
+
+    public function isPetugas()
+    {
+        return $this->role === 'petugas';
+    }
+
+    public function isKepala()
+    {
+        return $this->role === 'kepala';
+    }
+
+    public function member()
+    {
+        return $this->hasOne(\App\Models\Member::class);
+    }
+
+    public function isMahasantri()
+    {
+        return $this->role === 'mahasantri';
+}
+}
+

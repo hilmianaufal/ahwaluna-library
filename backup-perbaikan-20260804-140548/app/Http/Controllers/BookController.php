@@ -41,42 +41,23 @@ class BookController extends Controller
             'cover' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
         ]);
 
-        do {
-            $code = 'BK-' . strtoupper(Str::random(6));
-        } while (Book::where('code', $code)->exists());
-
-        $data['code'] = $code;
+        $data['code'] = 'BK-' . strtoupper(Str::random(6));
         $data['available_stock'] = $data['stock'];
         $data['is_digital'] = false;
         $data['can_borrow'] = true;
-
-        $newCoverPath = null;
-
         if ($request->hasFile('cover')) {
-            $uploadDirectory = public_path('uploads/books');
-
-            if (! file_exists($uploadDirectory)) {
-                mkdir($uploadDirectory, 0777, true);
+            if (!file_exists(public_path('uploads/books'))) {
+                mkdir(public_path('uploads/books'), 0777, true);
             }
 
             $file = $request->file('cover');
             $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
 
-            $file->move($uploadDirectory, $filename);
+            $file->move(public_path('uploads/books'), $filename);
 
-            $newCoverPath = 'uploads/books/' . $filename;
-            $data['cover'] = $newCoverPath;
+            $data['cover'] = 'uploads/books/' . $filename;
         }
-
-        try {
-            Book::create($data);
-        } catch (\Throwable $exception) {
-            if ($newCoverPath && file_exists(public_path($newCoverPath))) {
-                unlink(public_path($newCoverPath));
-            }
-
-            throw $exception;
-        }
+        Book::create($data);
 
         return redirect()
             ->route('books.index')
@@ -112,57 +93,27 @@ class BookController extends Controller
             'cover' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
         ]);
 
-        $activeLoanCount = $book->loans()
-            ->whereIn('status', ['borrowed', 'late'])
-            ->count();
-
-        if ((int) $data['stock'] < $activeLoanCount) {
-            return back()
-                ->withInput()
-                ->withErrors([
-                    'stock' => "Stok tidak boleh kurang dari {$activeLoanCount}, karena masih ada buku yang sedang dipinjam.",
-                ]);
-        }
-
-        $data['available_stock'] = (int) $data['stock'] - $activeLoanCount;
-
-        $oldCoverPath = $book->cover;
-        $newCoverPath = null;
+        $difference = $data['stock'] - $book->stock;
+        $data['available_stock'] = max(0, $book->available_stock + $difference);
 
         if ($request->hasFile('cover')) {
-            $uploadDirectory = public_path('uploads/books');
+            if (!file_exists(public_path('uploads/books'))) {
+                mkdir(public_path('uploads/books'), 0777, true);
+            }
 
-            if (! file_exists($uploadDirectory)) {
-                mkdir($uploadDirectory, 0777, true);
+            if ($book->cover && file_exists(public_path($book->cover))) {
+                unlink(public_path($book->cover));
             }
 
             $file = $request->file('cover');
             $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
 
-            $file->move($uploadDirectory, $filename);
+            $file->move(public_path('uploads/books'), $filename);
 
-            $newCoverPath = 'uploads/books/' . $filename;
-            $data['cover'] = $newCoverPath;
+            $data['cover'] = 'uploads/books/' . $filename;
         }
 
-        try {
-            $book->update($data);
-        } catch (\Throwable $exception) {
-            if ($newCoverPath && file_exists(public_path($newCoverPath))) {
-                unlink(public_path($newCoverPath));
-            }
-
-            throw $exception;
-        }
-
-        if (
-            $newCoverPath
-            && $oldCoverPath
-            && $oldCoverPath !== $newCoverPath
-            && file_exists(public_path($oldCoverPath))
-        ) {
-            unlink(public_path($oldCoverPath));
-        }
+        $book->update($data);
 
         return redirect()
             ->route('books.index')
@@ -171,20 +122,7 @@ class BookController extends Controller
 
     public function destroy(Book $book)
     {
-        if ($book->loans()->exists()) {
-            return back()->with(
-                'error',
-                'Buku tidak dapat dihapus karena sudah memiliki riwayat peminjaman.'
-            );
-        }
-
-        $coverPath = $book->cover;
-
         $book->delete();
-
-        if ($coverPath && file_exists(public_path($coverPath))) {
-            unlink(public_path($coverPath));
-        }
 
         return redirect()
             ->route('books.index')
